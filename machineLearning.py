@@ -6,8 +6,9 @@ import dgl
 from sklearn.metrics import r2_score
 import numpy as np
 import datetime
-start = datetime.datetime.now()
 
+# Deep graph learning (DGL) library. The graph convolution functions:
+# (where each node collects information about nearby nodes)
 
 def gcn_message(edges):
     return {'msg' : edges.src['h']}
@@ -15,72 +16,80 @@ def gcn_message(edges):
 def gcn_reduce(nodes):
     return {'h' : torch.sum(nodes.mailbox['msg'], dim=1)}
 
-class gcn_layer(nn.Module):
+# Below is the pytorch module that defines the operations at each graph convolution layer
+
+class gcnLayer(nn.Module):
     def __init__(self, in_feats, out_feats):
         super(gcn_layer, self).__init__()
         self.linear = nn.Linear(in_feats, out_feats)
 
     def forward(self, g, inputs):
-        g.ndata['h'] = inputs
-        g.send(g.edges(), gcn_message)
-        g.recv(g.nodes(), gcn_reduce)
-        h = g.ndata.pop('h')
-        return self.linear(h)
+        g.ndata['h'] = inputs #inputs: POI features
+        g.send(g.edges(), gcn_message)  #send + receive implements the graph convolution function desribed by Kipf and Welling (2017)
+        g.recv(g.nodes(), gcn_reduce)   # See https://tkipf.github.io/graph-convolutional-networks/  for the function and explanation.
+        h = g.ndata.pop('h')    # Result(Convoluted POIs) of convolution at a layer is extracted
+        return self.linear(h) # Result is linearly transformed
+
+# Below is the pytorch class (machine learning architetures are initiliazed as classes) 
+# that defines the the graph convolutional network (GCN) architecture (number of hidden layers, neurons, activation function, etc)
 
 class gcn(torch.nn.Module):
     def __init__(self, input, hidden, output):
         super(gcn, self).__init__()
-        self.gcn_first = gcn_layer(input,hidden)
-        self.gcn_hidden = gcn_layer(hidden,hidden)
-        self.gcn_last = gcn_layer(hidden,output)
+        # Initially each row in the input has (input) number of elements. 
+        #In other words, each node in the network has (input number of features, i.e.: number of POI types)
+        self.gcnInput = gcnLayer(input,hidden) # Input size is converted into hidden size
+        self.gcnHidden = gcnLayer(hidden,hidden) # Hidden size is converted into hidden size 
+        self.gcnOutput = gcnLayer(hidden,output) # Hidden size is converted into desired output size
 
-
+    # Forward function: this function is run when we call the class
     def forward(self, g, pois):
-        y = F.relu(self.gcn_first(g, pois))
-        y = F.relu(self.gcn_hidden(g, y))
-        #y = F.relu(self.gcn_hidden(g, y))
-        #y = F.relu(self.gcn_hidden(g, y))
-        #y = F.relu(self.gcn_hidden(g, y))
-        #y = F.relu(self.gcn_hidden(g, y))
-        y = F.relu(self.gcn_hidden(g, y))
-        y = self.gcn_last(g, y)
+        y = F.relu(self.gcnInput(g, pois)) # Result of the input layer is sent through activation function
+        y = F.relu(self.gcnHidden(g, y)) # Result of the hidden layer is sent through activation function
+        y = F.relu(self.gcnHidden(g, y)) # Result of the hidden layer is sent through activation function (Here, an arbitrary amount of hidden layers can be added)
+        y = self.gcnOutput(g, y) # Result of the output layer (not activated)
         return y
+
+
+# Below is the pytorch class that defines the the multilayer perceptron (MLP) architecture
+# (number of hidden layers, neurons, activation function, etc)
 
 class mlp(torch.nn.Module):
     def __init__(self, input, hidden):
-        super(mlp, self).__init__()
+        super(mlp, self).__init__() #initialize
 
-
-        self.classifier = nn.Sequential(
-            nn.Linear(input, hidden),
-            nn.ReLU(),
-            nn.Linear(hidden, hidden),
-            nn.ReLU(),
-            nn.Linear(hidden, 1))
+        self.classifier = nn.Sequential( # Sequential is used when combining different layers
+            nn.Linear(input, hidden), # Input feature matrix is converted into a matrix with shape (hidden) and linearly transformated
+            nn.ReLU(), # Activation function is applied
+            nn.Linear(hidden, hidden), # Result of previous layer is linearly transformaed
+            nn.ReLU(), # Activation function is applied
+            nn.Linear(hidden, 1))  # At the final layer, one output is given (Trip amount)
 
     def forward(self, x):
-        x = self.classifier(x)
+        x = self.classifier(x) # the input is sent throught the MLP architecture defined above
         return x
 
+# Below is the pytorch class that defines the the the combined deep learning architecture
+
 class od(nn.Module):
-    def __init__(self, gcninput, gcnhidden, gcnOutput, mlphidden):
+    def __init__(self, gcnInput, gcnHidden, gcnOutput, mlpHidden):
         super(od, self).__init__()
-        self.gcn = gcn(gcninput, gcnhidden,gcnOutput)
-        self.mlp = mlp((2*gcnoutput+1), mlphidden)
+        self.gcn = gcn(gcnInput, gcnHidden,gcnOutput) # First: GCN
+        self.mlp = mlp((2*gcnoutput+1), mlpHidden) # Afterwards: MLP
 
 
-    def forward(self, g, pois,costs,indices,gzn, zoneCount):
-        y = self.gcn(g,pois)
-        p = torch.zeros(len(costs),2*gzn).cuda()
+    def forward(self, g, pois, costs, indices, q, zoneCount):
+        y = self.gcn(g,pois) # First, send the input through GCN
+        p = torch.zeros(len(costs),2*q).cuda() # Prepare a matrix that will have the POI output at origin (size: q), POI output at destination (size: q) and distance between origin and destination (size: 1).
         count = 0
         for i in range(zoneCount):
             for j in range(zoneCount):
-                p[count][:gzn] = y[i][:]
-                p[count][gzn:] = y[j][:]
+                p[count][:q] = y[i][:]
+                p[count][q:] = y[j][:]
                 count +=1
         p = p[indices][:]
         costs = costs[indices][:]
-        inputs = torch.cat((p, costs), 1).cuda()
+        inputs = torch.cat((p, costs), 1).cuda() # .cuda() allocated GPU memory for the tensor (matrix)
         y = self.mlp(inputs)
         return y
 
