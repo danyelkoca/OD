@@ -80,39 +80,39 @@ class od(nn.Module):
 
     def forward(self, g, pois, costs, indices, q, zoneCount):
         y = self.gcn(g,pois) # First, send the input through GCN
-        p = torch.zeros(len(costs),2*q).cuda() # Prepare a matrix that will have the POI output at origin (size: q), POI output at destination (size: q) and distance between origin and destination (size: 1).
-        count = 0
+        p = torch.zeros(len(costs),2*q).cuda() # Prepare a matrix that will have the POI output at origin (size: q), POI output at destination (size: q) 
+        count = 0 
         for i in range(zoneCount):
             for j in range(zoneCount):
-                p[count][:q] = y[i][:]
-                p[count][q:] = y[j][:]
+                p[count][:q] = y[i][:] # POI output at origin (size: q)
+                p[count][q:] = y[j][:] # POI output at destination (size: q) 
                 count +=1
-        p = p[indices][:]
-        costs = costs[indices][:]
-        inputs = torch.cat((p, costs), 1).cuda() # .cuda() allocated GPU memory for the tensor (matrix)
-        y = self.mlp(inputs)
+        p = p[indices][:] # Order the input matrix in the order of shuffled zones (or OD pairs)
+        costs = costs[indices][:] # Order the cost matrix in the order of shuffled zones (or OD pairs)
+        inputs = torch.cat((p, costs), 1).cuda() # Combine POI and cost matrices
+        y = self.mlp(inputs) # Last, send through MLP
         return y
 
-def train(optimizer, model, criterion, pois, costs,labels,indices, zoneCount, gcnOutput):
-    model.train()
-    optimizer.zero_grad()
-    pred = model(g,pois,costs,indices,gcnOutput, zoneCount)
-    loss = criterion(pred, labels)
-    loss.backward()
-    optimizer.step()
-    return loss.item()
+def train(optimizer, model, criterion, pois, costs, labels, indices, zoneCount, gcnOutput):
+    model.train() # Model is in the training mode (meaning gradients are calculated)
+    optimizer.zero_grad() # Gradients are zeroed
+    pred = model(g, pois, costs, indices, gcnOutput, zoneCount) # Get model output as predicted output
+    loss = criterion(pred, labels) # Calculate loss between prediction and label
+    loss.backward() # Backpropagate the gradients
+    optimizer.step() # (I dont fully know what happens with this code)
+    return loss.item() # Return loss
 
 
 def test(model, pois, costs, labels, indices, zoneCount, gcnOutput):
-    model.eval()
-    with torch.no_grad():
-        pred = model(g, pois, costs, indices,gcnOutput, zoneCount)
-        predictions = pred.detach().cpu()
-        r2 = r2_score(labels.cpu(), predictions)
-        return r2
+    model.eval() # Mode is in evaluation mode: no gradients are calcualted
+    with torch.no_grad(): # In tensorflow if tensor has a parameter "autograd:true" then, gradients are calculated. This code sets the autograd to false for all tensors below
+        pred = model(g, pois, costs, indices,gcnOutput, zoneCount) # Get prediction
+        predictions = pred.detach().cpu() # Move prediction tensor from GPU to CPU
+        r2 = r2_score(labels.cpu(), predictions) # Calculate R2
+        return r2 
 
-def data_collection(key):
-    if key == "mb":
+def data_collection(key): #Below part gets the data from the files into the program (POIS, nodes, costs, labels). If the file types are different than the ones used in this research, this part should be adjusted.
+    if key == "mb": #mb: manhattan and brooklyn case
         no = 3
     else:
         no = 2
@@ -141,14 +141,14 @@ def data_collection(key):
             labels[count][0] = int(row[3])
             count += 1
 
-    g = dgl.DGLGraph().to(torch.device('cuda:0'))
-    g.add_nodes(nodeCount)
+    g = dgl.DGLGraph().to(torch.device('cuda:0')) # dgl: deep graph learning library: We move POIs to the graph for graph convolution
+    g.add_nodes(nodeCount) # Add nodes to the graph
 
 
     with open('{}/edges.csv'.format(key), mode='r') as rx:
         r = csv.reader(rx, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
         for row in r:
-            g.add_edge(int(row[0]), int(row[1]))
+            g.add_edge(int(row[0]), int(row[1])) # If edge exists between 2 nodes, add edge
 
     print('We have %d nodes.' % g.number_of_nodes())
     print('We have %d edges.' % g.number_of_edges())
@@ -164,10 +164,10 @@ with open("costFinal.csv", mode='w', newline="") as wx:
     w.writerow(["place", "iteration", "split", "r2"])
     for key in keys:
         [g, pois, labels, costs, zoneCount, poiCount] = data_collection(key)
-        for iteration in range(1,11):
-            a = np.random.permutation(zoneCount)
+        for iteration in range(1,11): # We test each split ratio with 10 times to get the average
+            a = np.random.permutation(zoneCount) # randomize the zones
             for i in range(1,10):
-                split = i/10
+                split = i/10 # split the training and test subsets
                 breaker = int(split * zoneCount)
                 train_zones = a[:breaker]
                 test_zones = a[breaker:]
@@ -178,16 +178,12 @@ with open("costFinal.csv", mode='w', newline="") as wx:
                 for z in test_zones:
                     test_indices += [j for j in range(z * zoneCount, z * zoneCount + zoneCount)]
                 # (gcninput, gcnhidden, gcnoutput, mlphidden):
-                model = od(poiCount, 64, gcnoutput, 64).cuda()
-                optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
-                criterion = torch.nn.MSELoss()
-                for epoch in range(1, 501):
-                    loss = train(optimizer, model, criterion, pois, costs, labels[train_indices], train_indices, zoneCount, gcnoutput)
+                model = od(poiCount, 64, gcnoutput, 64).cuda() # construct the model
+                optimizer = torch.optim.Adam(model.parameters(), lr=0.01) # optimizer: adam optimizer
+                criterion = torch.nn.MSELoss() # loss: mean squared error loss
+                for epoch in range(1, 501): # Train the algorithm 500 epochs
+                    loss = train(optimizer, model, criterion, pois, costs, labels[train_indices], train_indices, zoneCount, gcnoutput) 
                     print(count, datetime.datetime.now() - start, key, iteration, i, epoch, loss)
                     count += 1
-                r2 = test(model, pois, costs, labels[test_indices], test_indices, zoneCount, gcnoutput)
-                w.writerow([key, iteration, i*10, r2])
-"""
-!!! PROGRAM RUNNING !!!
-!!! PLEASE DONT STOP IT !!!
-"""
+                r2 = test(model, pois, costs, labels[test_indices], test_indices, zoneCount, gcnoutput) # At the end of the algorithm, test the model and get r2
+                w.writerow([key, iteration, i*10, r2]) # write key[manhattan,brooklyn,manhattan and brooklyn], iteration[0...9], split ratio[10%...90%], r2 to the file
