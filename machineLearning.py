@@ -27,13 +27,13 @@ class gcnLayer(nn.Module):
         self.linear = nn.Linear(in_feats, out_feats)
 
     def forward(self, g, inputs):
-        g.ndata['h'] = inputs #inputs: POI features
-        g.send(g.edges(), gcn_message)  #send + receive implements the graph convolution function desribed by Kipf and Welling (2017)
+        g.ndata['h'] = inputs # inputs: POI features
+        g.send(g.edges(), gcn_message)  # send + receive implements the graph convolution function desribed by Kipf and Welling (2017)
         g.recv(g.nodes(), gcn_reduce)   # See https://tkipf.github.io/graph-convolutional-networks/  for the function and explanation.
-        h = g.ndata.pop('h')    # Result(Convoluted POIs) of convolution at a layer is extracted
+        h = g.ndata.pop('h')    # Result (Convoluted POIs) of convolution at a layer is extracted
         return self.linear(h) # Result is linearly transformed
 
-# Below is the pytorch class (machine learning architetures are initiliazed as classes) 
+# Below is the pytorch class (machine learning architectures are initiliazed as classes) 
 # that defines the the graph convolutional network (GCN) architecture (number of hidden layers, neurons, activation function, etc)
 
 class gcn(torch.nn.Module):
