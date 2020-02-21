@@ -1,3 +1,6 @@
+# Source code for research: OD matrix estimation with deep learning using maps
+# Author: Danyel Koca
+
 import csv
 import torch
 import torch.nn as nn
