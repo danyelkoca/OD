@@ -170,7 +170,7 @@ with open("costFinal.csv", mode='w', newline="") as wx:
         for iteration in range(1,11): # We test each split ratio with 10 times to get the average
             a = np.random.permutation(zoneCount) # randomize the zones
             for i in range(1,10):
-                split = i/10 # split the training and test subsets
+                split = i/10 # Below lines split the training and test subsets
                 breaker = int(split * zoneCount)
                 train_zones = a[:breaker]
                 test_zones = a[breaker:]
@@ -180,7 +180,7 @@ with open("costFinal.csv", mode='w', newline="") as wx:
                     train_indices += [j for j in range(z * zoneCount, z * zoneCount + zoneCount)]
                 for z in test_zones:
                     test_indices += [j for j in range(z * zoneCount, z * zoneCount + zoneCount)]
-                # (gcninput, gcnhidden, gcnoutput, mlphidden):
+                # model parameters: gcninput, gcnhidden, gcnoutput, mlphidden
                 model = od(poiCount, 64, gcnoutput, 64).cuda() # construct the model
                 optimizer = torch.optim.Adam(model.parameters(), lr=0.01) # optimizer: adam optimizer
                 criterion = torch.nn.MSELoss() # loss: mean squared error loss
