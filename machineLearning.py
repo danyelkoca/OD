@@ -10,7 +10,7 @@ from sklearn.metrics import r2_score
 import numpy as np
 import datetime
 
-# Deep graph learning (DGL) library. The graph convolution functions:
+# Below are the graph convolution functions:
 # (where each node collects information about nearby nodes)
 
 def gcn_message(edges):
